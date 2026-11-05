@@ -61,3 +61,7 @@ npm run dist       # Windows kurulum dosyasını dist/ klasörüne oluştur
 | `index.html` | Web adresini `metronom.html`'ye yönlendirir |
 | `simge.png`, `build/icon.png` | Uygulama simgesi |
 | `package.json` | Proje ayarları ve kurulum dosyası yapılandırması |
+
+## Lisans
+
+[MIT](LICENSE): Kodu herkes ücretsiz kullanabilir, değiştirebilir ve dağıtabilir; tek şart telif ve lisans metninin korunmasıdır.
