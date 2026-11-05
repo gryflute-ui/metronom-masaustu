@@ -1,7 +1,7 @@
 {
   "name": "metronom-masaustu",
   "productName": "Metronom",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Alt bölüm destekli masaüstü metronom",
   "author": "Metronom",
   "main": "main.js",
