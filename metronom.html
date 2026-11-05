@@ -58,11 +58,48 @@
   .nokta.ara { width: 9px; height: 9px; }
   .nokta.ara.aktif { background: #8aadf4; transform: scale(1.4); }
   label { font-size: .9rem; opacity: .8; }
+
+  /* ---------- Sekmeler ---------- */
+  .sekmeler { display: flex; gap: .5rem; margin-bottom: 1.4rem; }
+  .sekme { flex: 1; padding: .6rem; font-weight: 600; opacity: .6; }
+  .sekme.secili { background: #8aadf4; color: #1e1e2e; opacity: 1; }
+  .panel[hidden] { display: none; }
+
+  /* ---------- Akort aleti ---------- */
+  .nota { font-size: 4rem; font-weight: 700; line-height: 1; min-height: 4rem; }
+  .nota-harf { font-size: .95rem; opacity: .6; margin: .3rem 0 1rem; min-height: 1.2em; }
+  .gosterge {
+    position: relative; height: 34px; margin: .6rem 0 .3rem;
+    background: linear-gradient(to right, #ed8796 0%, #f5a97f 30%, #a6da95 45%, #a6da95 55%, #f5a97f 70%, #ed8796 100%);
+    border-radius: 8px; opacity: .85;
+  }
+  .gosterge::after {   /* tam ortadaki doğru akort çizgisi */
+    content: ''; position: absolute; left: 50%; top: -4px; bottom: -4px;
+    width: 2px; background: #e0e0e0; transform: translateX(-50%);
+  }
+  .ibre {
+    position: absolute; top: -6px; bottom: -6px; left: 50%; width: 6px;
+    background: #1e1e2e; border: 2px solid #e0e0e0; border-radius: 3px;
+    transform: translateX(-50%); transition: left .12s; display: none;
+  }
+  .olcek { display: flex; justify-content: space-between; font-size: .75rem; opacity: .5; }
+  .sent { font-size: 1.1rem; margin: .8rem 0 .2rem; min-height: 1.4em; }
+  .sent.tamam { color: #a6da95; font-weight: 700; }
+  .frekans { font-size: .85rem; opacity: .6; min-height: 1.2em; }
+  .a4-deger { font-weight: 700; }
+  .akort-baslat.calisiyor { background: #ed8796; }
+  .ref-ses.caliyor { background: #f5a97f; color: #1e1e2e; }
+  .uyari { font-size: .8rem; color: #ed8796; margin-top: .6rem; min-height: 1em; }
 </style>
 </head>
 <body>
 <div class="metronom">
-  <h1>🎵 METRONOM</h1>
+  <div class="sekmeler">
+    <button class="sekme secili" data-panel="metronomPanel">🎵 Metronom</button>
+    <button class="sekme" data-panel="akortPanel">🎻 Akort</button>
+  </div>
+
+  <div class="panel" id="metronomPanel">
 
   <div class="bpm" id="bpmGoster">120</div>
   <div class="bpm-etiket">BPM</div>
@@ -102,6 +139,32 @@
   <div class="vuruslar" id="vuruslar"></div>
 
   <button class="baslat" id="baslat">▶ Başlat</button>
+  </div>
+
+  <div class="panel" id="akortPanel" hidden>
+    <div class="nota" id="notaAdi">–</div>
+    <div class="nota-harf" id="notaHarf">Mikrofonu başlatın</div>
+
+    <div class="gosterge"><div class="ibre" id="ibre"></div></div>
+    <div class="olcek"><span>−50</span><span>0</span><span>+50</span></div>
+
+    <div class="sent" id="sentGoster">&nbsp;</div>
+    <div class="frekans" id="frekansGoster">&nbsp;</div>
+
+    <div class="satir" style="justify-content: center; margin-top: 1.4rem;">
+      <label>Kalibrasyon La (A4):</label>
+      <span class="a4-deger" id="a4Goster">440 Hz</span>
+    </div>
+    <div class="satir" style="margin-top: 0;">
+      <button id="a4Eksi">−</button>
+      <input type="range" id="a4Kaydirici" min="440" max="450" step="1" value="440">
+      <button id="a4Arti">+</button>
+    </div>
+
+    <button class="ref-ses" id="refSes" style="width:100%">🔊 La sesini çal (440 Hz)</button>
+    <button class="baslat akort-baslat" id="akortBaslat">🎤 Akordu Başlat</button>
+    <div class="uyari" id="akortUyari"></div>
+  </div>
 </div>
 
 <script>
@@ -269,12 +332,216 @@ document.getElementById('tap').addEventListener('click', () => {
 
 // Klavye kısayolları: Boşluk = başlat/durdur, ok tuşları = BPM
 document.addEventListener('keydown', e => {
+  if (metronomPanel.hidden) return;   // kısayollar yalnızca metronom sekmesinde
   if (e.code === 'Space') { e.preventDefault(); calisiyor ? durdur() : baslat(); }
   if (e.code === 'ArrowUp' || e.code === 'ArrowRight') bpmAyarla(bpm + 1);
   if (e.code === 'ArrowDown' || e.code === 'ArrowLeft') bpmAyarla(bpm - 1);
 });
 
 noktalariCiz();
+
+// ---------- Sekmeler ----------
+const metronomPanel = document.getElementById('metronomPanel');
+const akortPanel = document.getElementById('akortPanel');
+
+document.querySelectorAll('.sekme').forEach(sekme => {
+  sekme.addEventListener('click', () => {
+    document.querySelectorAll('.sekme').forEach(s => s.classList.toggle('secili', s === sekme));
+    metronomPanel.hidden = sekme.dataset.panel !== 'metronomPanel';
+    akortPanel.hidden = sekme.dataset.panel !== 'akortPanel';
+    if (akortPanel.hidden) { akordDurdur(); refSesDurdur(); }  // başka sekmede mikrofon açık kalmasın
+    sekme.blur();
+  });
+});
+
+// ---------- Akort aleti ----------
+// Mikrofondan gelen sesin frekansı otokorelasyonla bulunur, sonra seçilen
+// La (A4) frekansına göre en yakın nota ve sapma (sent) hesaplanır.
+const NOTA_ADLARI = ['Do', 'Do♯', 'Re', 'Re♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
+const NOTA_HARFLERI = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+
+let a4 = parseInt(localStorage.getItem('metronomA4')) || 440;
+let mikrofonAkisi = null;
+let mikrofonKaynagi = null;
+let analizci = null;
+let analizTamponu = null;
+let akortZamanlayici = null;
+let sonFrekanslar = [];      // ibre titremesin diye son ölçümlerin ortancası kullanılır
+let sessizSayac = 0;
+let refOsilator = null;
+
+const a4Kaydirici = document.getElementById('a4Kaydirici');
+const a4Goster = document.getElementById('a4Goster');
+const refSesBtn = document.getElementById('refSes');
+const akortBaslatBtn = document.getElementById('akortBaslat');
+const notaAdi = document.getElementById('notaAdi');
+const notaHarf = document.getElementById('notaHarf');
+const ibre = document.getElementById('ibre');
+const sentGoster = document.getElementById('sentGoster');
+const frekansGoster = document.getElementById('frekansGoster');
+const akortUyari = document.getElementById('akortUyari');
+
+function sesBaglamiHazirla() {
+  if (!sesBaglami) sesBaglami = new (window.AudioContext || window.webkitAudioContext)();
+  sesBaglami.resume();
+}
+
+function a4Ayarla(yeni) {
+  a4 = Math.min(450, Math.max(440, Math.round(yeni)));
+  a4Kaydirici.value = a4;
+  a4Goster.textContent = a4 + ' Hz';
+  refSesBtn.textContent = (refOsilator ? '■ La sesini durdur' : '🔊 La sesini çal') + ` (${a4} Hz)`;
+  if (refOsilator) refOsilator.frequency.setValueAtTime(a4, sesBaglami.currentTime);
+  localStorage.setItem('metronomA4', a4);
+}
+
+// Otokorelasyon ile temel frekansı bulur; ses çok kısıksa -1 döner
+function frekansBul(tampon, ornekHizi) {
+  let n = tampon.length;
+  let rms = 0;
+  for (let i = 0; i < n; i++) rms += tampon[i] * tampon[i];
+  if (Math.sqrt(rms / n) < 0.01) return -1;
+
+  // Baştaki ve sondaki yüksek genlikli kısımları kırp (daha temiz sonuç verir)
+  let bas = 0, son = n - 1;
+  const esik = 0.2;
+  for (let i = 0; i < n / 2; i++) if (Math.abs(tampon[i]) < esik) { bas = i; break; }
+  for (let i = 1; i < n / 2; i++) if (Math.abs(tampon[n - i]) < esik) { son = n - i; break; }
+  const t = tampon.slice(bas, son);
+  n = t.length;
+
+  const c = new Float32Array(n);
+  for (let gecikme = 0; gecikme < n; gecikme++) {
+    let toplam = 0;
+    for (let j = 0; j < n - gecikme; j++) toplam += t[j] * t[j + gecikme];
+    c[gecikme] = toplam;
+  }
+
+  // İlk çukuru geç, sonra en yüksek tepeyi bul
+  let d = 0;
+  while (d < n - 1 && c[d] > c[d + 1]) d++;
+  let enBuyuk = -1, konum = -1;
+  for (let i = d; i < n; i++) if (c[i] > enBuyuk) { enBuyuk = c[i]; konum = i; }
+  if (konum <= 0 || konum >= n - 1) return -1;
+
+  // Parabolik ara değerleme: tepeyi örnek aralığından daha hassas bulur
+  const x1 = c[konum - 1], x2 = c[konum], x3 = c[konum + 1];
+  const a = (x1 + x3 - 2 * x2) / 2;
+  const b = (x3 - x1) / 2;
+  const T0 = a ? konum - b / (2 * a) : konum;
+  return ornekHizi / T0;
+}
+
+function akortGuncelle() {
+  analizci.getFloatTimeDomainData(analizTamponu);
+  const f = frekansBul(analizTamponu, sesBaglami.sampleRate);
+
+  if (f < 25 || f > 4200) {           // ses yok ya da güvenilmez ölçüm
+    if (++sessizSayac > 15) {         // ~0,75 sn sessizlikten sonra göstergeyi temizle
+      sonFrekanslar = [];
+      notaAdi.textContent = '–';
+      notaHarf.textContent = 'Bir nota çalın';
+      sentGoster.innerHTML = '&nbsp;';
+      sentGoster.classList.remove('tamam');
+      frekansGoster.innerHTML = '&nbsp;';
+      ibre.style.display = 'none';
+    }
+    return;
+  }
+  sessizSayac = 0;
+
+  sonFrekanslar.push(f);
+  if (sonFrekanslar.length > 5) sonFrekanslar.shift();
+  const sirali = [...sonFrekanslar].sort((x, y) => x - y);
+  const frekans = sirali[Math.floor(sirali.length / 2)];
+
+  // MIDI nota numarası: 69 = A4. Seçilen A4 frekansı referans alınır.
+  const midi = 69 + 12 * Math.log2(frekans / a4);
+  const nota = Math.round(midi);
+  const sent = Math.round((midi - nota) * 100);
+  const sira = ((nota % 12) + 12) % 12;
+  const oktav = Math.floor(nota / 12) - 1;
+
+  notaAdi.textContent = NOTA_ADLARI[sira];
+  notaHarf.textContent = NOTA_HARFLERI[sira] + oktav;
+  frekansGoster.textContent = frekans.toFixed(1) + ' Hz';
+
+  ibre.style.display = 'block';
+  ibre.style.left = (50 + sent) + '%';
+  const tamam = Math.abs(sent) <= 5;
+  sentGoster.classList.toggle('tamam', tamam);
+  sentGoster.textContent = tamam ? '✓ Akortta'
+    : (sent > 0 ? `+${sent} sent · tiz (pesleştirin)` : `${sent} sent · pes (tizleştirin)`);
+}
+
+async function akordBaslat() {
+  akortUyari.textContent = '';
+  try {
+    sesBaglamiHazirla();
+    // Tarayıcının ses işlemeleri perdeyi bozmasın diye kapatılır
+    mikrofonAkisi = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } catch (hata) {
+    akortUyari.textContent = 'Mikrofona erişilemedi. Tarayıcıda mikrofon izni verin.';
+    return;
+  }
+  mikrofonKaynagi = sesBaglami.createMediaStreamSource(mikrofonAkisi);
+  analizci = sesBaglami.createAnalyser();
+  analizci.fftSize = 2048;
+  analizTamponu = new Float32Array(analizci.fftSize);
+  mikrofonKaynagi.connect(analizci);   // hoparlöre bağlanmaz, yalnızca dinlenir
+  akortZamanlayici = setInterval(akortGuncelle, 50);
+  notaHarf.textContent = 'Bir nota çalın';
+  akortBaslatBtn.textContent = '■ Akordu Durdur';
+  akortBaslatBtn.classList.add('calisiyor');
+}
+
+function akordDurdur() {
+  if (!mikrofonAkisi) return;
+  clearInterval(akortZamanlayici);
+  mikrofonKaynagi.disconnect();
+  mikrofonAkisi.getTracks().forEach(iz => iz.stop());
+  mikrofonAkisi = null;
+  sonFrekanslar = [];
+  notaAdi.textContent = '–';
+  notaHarf.textContent = 'Mikrofonu başlatın';
+  sentGoster.innerHTML = '&nbsp;';
+  sentGoster.classList.remove('tamam');
+  frekansGoster.innerHTML = '&nbsp;';
+  ibre.style.display = 'none';
+  akortBaslatBtn.textContent = '🎤 Akordu Başlat';
+  akortBaslatBtn.classList.remove('calisiyor');
+}
+
+// Referans La sesi: seçilen A4 frekansında sürekli çalan sinüs
+function refSesCal() {
+  sesBaglamiHazirla();
+  refOsilator = sesBaglami.createOscillator();
+  const kazanc = sesBaglami.createGain();
+  refOsilator.frequency.value = a4;
+  kazanc.gain.value = 0.25;
+  refOsilator.connect(kazanc).connect(sesBaglami.destination);
+  refOsilator.start();
+  refSesBtn.classList.add('caliyor');
+  a4Ayarla(a4);
+}
+
+function refSesDurdur() {
+  if (!refOsilator) return;
+  refOsilator.stop();
+  refOsilator = null;
+  refSesBtn.classList.remove('caliyor');
+  a4Ayarla(a4);
+}
+
+a4Kaydirici.addEventListener('input', e => a4Ayarla(e.target.value));
+document.getElementById('a4Eksi').addEventListener('click', () => a4Ayarla(a4 - 1));
+document.getElementById('a4Arti').addEventListener('click', () => a4Ayarla(a4 + 1));
+refSesBtn.addEventListener('click', () => refOsilator ? refSesDurdur() : refSesCal());
+akortBaslatBtn.addEventListener('click', () => mikrofonAkisi ? akordDurdur() : akordBaslat());
+
+a4Ayarla(a4);
 </script>
 </body>
 </html>
