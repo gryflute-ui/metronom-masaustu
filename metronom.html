@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metronom</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #1e1e2e;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .metronom {
+    background: #2a2a3d;
+    padding: 2rem 2.5rem;
+    border-radius: 16px;
+    width: 340px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4);
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 1.2rem; letter-spacing: 1px; }
+  .bpm { font-size: 4rem; font-weight: 700; line-height: 1; }
+  .bpm-etiket { font-size: .9rem; opacity: .6; margin-bottom: 1rem; }
+  .tempo-adi { font-size: .95rem; color: #f5a97f; margin-bottom: 1rem; height: 1.2em; }
+  .satir { display: flex; align-items: center; gap: .6rem; margin: .8rem 0; }
+  input[type=range] { flex: 1; accent-color: #8aadf4; }
+  button {
+    background: #3b3b55; color: #e0e0e0; border: none;
+    border-radius: 8px; padding: .5rem .9rem; font-size: 1rem; cursor: pointer;
+  }
+  button:hover { background: #4a4a6a; }
+  .baslat {
+    width: 100%; padding: .9rem; font-size: 1.2rem; margin-top: 1rem;
+    background: #8aadf4; color: #1e1e2e; font-weight: 700;
+  }
+  .baslat.calisiyor { background: #ed8796; }
+  select {
+    background: #3b3b55; color: #e0e0e0; border: none;
+    border-radius: 8px; padding: .4rem; font-size: 1rem;
+  }
+  .vuruslar {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: .6rem .9rem; margin: 1.2rem 0; min-height: 30px;
+  }
+  .grup { display: flex; align-items: center; gap: 5px; }
+  .nokta {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #3b3b55; transition: background .05s, transform .05s;
+  }
+  .nokta.aktif { background: #a6da95; transform: scale(1.3); }
+  .nokta.aktif.vurgu { background: #f5a97f; }
+  /* Ara vuruşlar: küçük ve soluk */
+  .nokta.ara { width: 9px; height: 9px; }
+  .nokta.ara.aktif { background: #8aadf4; transform: scale(1.4); }
+  label { font-size: .9rem; opacity: .8; }
+</style>
+</head>
+<body>
+<div class="metronom">
+  <h1>🎵 METRONOM</h1>
+
+  <div class="bpm" id="bpmGoster">120</div>
+  <div class="bpm-etiket">BPM</div>
+  <div class="tempo-adi" id="tempoAdi">Allegro</div>
+
+  <div class="satir">
+    <button id="eksi">−</button>
+    <input type="range" id="bpmKaydirici" min="30" max="250" value="120">
+    <button id="arti">+</button>
+  </div>
+
+  <div class="satir" style="justify-content: space-between;">
+    <label>Ölçü:
+      <select id="olcu">
+        <option value="2">2/4</option>
+        <option value="3">3/4</option>
+        <option value="4" selected>4/4</option>
+        <option value="5">5/4</option>
+        <option value="6">6/8</option>
+        <option value="7">7/8</option>
+      </select>
+    </label>
+    <button id="tap">Tap Tempo</button>
+  </div>
+
+  <div class="satir">
+    <label>Alt bölüm:
+      <select id="altBolum">
+        <option value="1" selected>Dörtlük (♩)</option>
+        <option value="2">Sekizlik (♫)</option>
+        <option value="3">Üçleme (3)</option>
+        <option value="4">Onaltılık (♬♬)</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="vuruslar" id="vuruslar"></div>
+
+  <button class="baslat" id="baslat">▶ Başlat</button>
+</div>
+
+<script>
+// ---------- Ayarlar ----------
+let bpm = 120;
+let vurusSayisi = 4;        // ölçüdeki vuruş sayısı
+let altBolum = 1;           // vuruş başına tık: 1=dörtlük, 2=sekizlik, 3=üçleme, 4=onaltılık
+let calisiyor = false;
+
+// ---------- Ses zamanlaması (Web Audio API) ----------
+// setInterval tek başına kaymaya neden olur. Bu yüzden sesleri
+// birkaç milisaniye önceden AudioContext saatine göre planlıyoruz.
+let sesBaglami = null;
+let siradakiVurusZamani = 0;
+let mevcutVurus = 0;
+let mevcutAlt = 0;          // vuruş içindeki alt bölüm sırası (0 = asıl vuruş)
+let zamanlayici = null;
+const ILERIYE_BAK = 0.1;    // saniye: ne kadar ileriyi planlayalım
+const KONTROL_ARALIGI = 25; // ms: zamanlayıcı ne sıklıkla çalışsın
+
+// tur: 'vurgu' (ölçünün ilk vuruşu), 'vurus' (diğer vuruşlar), 'ara' (alt bölümler)
+const SES_AYARI = {
+  vurgu: { frekans: 1500, ses: 1.0 },
+  vurus: { frekans: 1000, ses: 1.0 },
+  ara:   { frekans: 800,  ses: 0.3 },   // ara vuruşlar daha pes ve kısık
+};
+
+function tikCal(zaman, tur) {
+  const { frekans, ses } = SES_AYARI[tur];
+  const osc = sesBaglami.createOscillator();
+  const kazanc = sesBaglami.createGain();
+  osc.frequency.value = frekans;
+  kazanc.gain.setValueAtTime(ses, zaman);
+  kazanc.gain.exponentialRampToValueAtTime(0.001, zaman + 0.05);
+  osc.connect(kazanc).connect(sesBaglami.destination);
+  osc.start(zaman);
+  osc.stop(zaman + 0.05);
+}
+
+// Alt bölüm sayısı çalarken değişirse sayaç taşabilir; burada düzeltilir
+function sonrakiVurusaGecGerekirse() {
+  if (mevcutAlt >= altBolum) {
+    mevcutAlt = 0;
+    mevcutVurus = (mevcutVurus + 1) % vurusSayisi;
+  }
+}
+
+function planla() {
+  while (siradakiVurusZamani < sesBaglami.currentTime + ILERIYE_BAK) {
+    sonrakiVurusaGecGerekirse();
+    const vurus = mevcutVurus;
+    const alt = mevcutAlt;
+    const tur = alt > 0 ? 'ara' : (vurus === 0 ? 'vurgu' : 'vurus');
+    tikCal(siradakiVurusZamani, tur);
+
+    // Görsel göstergeyi sesle aynı anda yak
+    const indeks = vurus * altBolum + alt;
+    const gecikme = (siradakiVurusZamani - sesBaglami.currentTime) * 1000;
+    setTimeout(() => noktaYak(indeks), Math.max(0, gecikme));
+
+    // Bir vuruşun süresi alt bölüm sayısına eşit parçalara bölünür
+    siradakiVurusZamani += 60 / bpm / altBolum;
+    mevcutAlt++;
+    sonrakiVurusaGecGerekirse();
+  }
+}
+
+function baslat() {
+  if (!sesBaglami) sesBaglami = new (window.AudioContext || window.webkitAudioContext)();
+  sesBaglami.resume();
+  mevcutVurus = 0;
+  mevcutAlt = 0;
+  siradakiVurusZamani = sesBaglami.currentTime + 0.05;
+  zamanlayici = setInterval(planla, KONTROL_ARALIGI);
+  calisiyor = true;
+  baslatBtn.textContent = '■ Durdur';
+  baslatBtn.classList.add('calisiyor');
+}
+
+function durdur() {
+  clearInterval(zamanlayici);
+  calisiyor = false;
+  baslatBtn.textContent = '▶ Başlat';
+  baslatBtn.classList.remove('calisiyor');
+  document.querySelectorAll('.nokta').forEach(n => n.classList.remove('aktif'));
+}
+
+// ---------- Arayüz ----------
+const bpmGoster = document.getElementById('bpmGoster');
+const bpmKaydirici = document.getElementById('bpmKaydirici');
+const tempoAdi = document.getElementById('tempoAdi');
+const baslatBtn = document.getElementById('baslat');
+const vuruslarDiv = document.getElementById('vuruslar');
+
+function tempoIsmi(b) {
+  if (b < 60) return 'Largo';
+  if (b < 76) return 'Adagio';
+  if (b < 108) return 'Andante';
+  if (b < 120) return 'Moderato';
+  if (b < 168) return 'Allegro';
+  if (b < 200) return 'Presto';
+  return 'Prestissimo';
+}
+
+function bpmAyarla(yeni) {
+  bpm = Math.min(250, Math.max(30, Math.round(yeni)));
+  bpmGoster.textContent = bpm;
+  bpmKaydirici.value = bpm;
+  tempoAdi.textContent = tempoIsmi(bpm);
+}
+
+// Her vuruş bir grup: büyük nokta (asıl vuruş) + küçük noktalar (ara vuruşlar)
+function noktalariCiz() {
+  vuruslarDiv.innerHTML = '';
+  for (let i = 0; i < vurusSayisi; i++) {
+    const grup = document.createElement('div');
+    grup.className = 'grup';
+    for (let a = 0; a < altBolum; a++) {
+      const n = document.createElement('div');
+      n.className = 'nokta' + (a > 0 ? ' ara' : (i === 0 ? ' vurgu' : ''));
+      grup.appendChild(n);
+    }
+    vuruslarDiv.appendChild(grup);
+  }
+}
+
+// indeks = vuruş * altBolum + alt; noktalar sırayla bu düzende dizili
+function noktaYak(indeks) {
+  vuruslarDiv.querySelectorAll('.nokta').forEach((n, i) => {
+    n.classList.toggle('aktif', i === indeks);
+  });
+}
+
+// Olaylar
+bpmKaydirici.addEventListener('input', e => bpmAyarla(e.target.value));
+document.getElementById('eksi').addEventListener('click', () => bpmAyarla(bpm - 1));
+document.getElementById('arti').addEventListener('click', () => bpmAyarla(bpm + 1));
+baslatBtn.addEventListener('click', () => calisiyor ? durdur() : baslat());
+
+document.getElementById('olcu').addEventListener('change', e => {
+  vurusSayisi = parseInt(e.target.value);
+  mevcutVurus = 0;
+  mevcutAlt = 0;
+  noktalariCiz();
+});
+
+document.getElementById('altBolum').addEventListener('change', e => {
+  altBolum = parseInt(e.target.value);
+  noktalariCiz();
+  e.target.blur(); // ok tuşları menü yerine BPM'i değiştirsin
+});
+
+// Tap tempo: son dokunuşların ortalamasından BPM hesaplar
+let dokunuslar = [];
+document.getElementById('tap').addEventListener('click', () => {
+  const simdi = performance.now();
+  if (dokunuslar.length && simdi - dokunuslar[dokunuslar.length - 1] > 2000) dokunuslar = [];
+  dokunuslar.push(simdi);
+  if (dokunuslar.length > 5) dokunuslar.shift();
+  if (dokunuslar.length >= 2) {
+    const aralik = (dokunuslar[dokunuslar.length - 1] - dokunuslar[0]) / (dokunuslar.length - 1);
+    bpmAyarla(60000 / aralik);
+  }
+});
+
+// Klavye kısayolları: Boşluk = başlat/durdur, ok tuşları = BPM
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); calisiyor ? durdur() : baslat(); }
+  if (e.code === 'ArrowUp' || e.code === 'ArrowRight') bpmAyarla(bpm + 1);
+  if (e.code === 'ArrowDown' || e.code === 'ArrowLeft') bpmAyarla(bpm - 1);
+});
+
+noktalariCiz();
+</script>
+</body>
+</html>
